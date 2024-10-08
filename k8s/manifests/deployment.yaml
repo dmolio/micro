@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: item-management-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: item-management-api
+  template:
+    metadata:
+      labels:
+        app: item-management-api
+    spec:
+      containers:
+      - name: item-management-api
+        image: dmolio/item-management-api:latest
+        ports:
+        - containerPort: 5001

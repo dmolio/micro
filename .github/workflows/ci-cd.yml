@@ -48,7 +48,32 @@ jobs:
     if: github.ref == 'refs/heads/main'
     
     steps:
-    - name: Deploy to production
+    - uses: actions/checkout@v2
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: your-aws-region
+
+    - name: Update kubeconfig
       run: |
-        echo "Add your deployment steps here"
-        # This could be deploying to EKS, updating a Kubernetes deployment, etc.
+        aws eks get-token --cluster-name demo-cluster --region us-east-1 | kubectl apply -f -
+        aws eks update-kubeconfig --name demo-cluster --region us-east-1
+
+    - name: Update Kubernetes manifests
+      run: |
+        sed -i 's|dmolio/item-management-api:.*|dmolio/item-management-api:${{ github.sha }}|' kubernetes/deployment.yaml
+
+    - name: Commit and push updated manifests
+      run: |
+        git config --global user.name 'GitHub Actions'
+        git config --global user.email 'actions@github.com'
+        git add kubernetes/deployment.yaml
+        git commit -m "Update image tag to ${{ github.sha }}"
+        git push
+
+    - name: Trigger ArgoCD sync
+      run: |
+        argocd app sync item-management-api
