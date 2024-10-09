@@ -126,7 +126,23 @@ jobs:
 
     - name: Trigger ArgoCD sync
       run: |
-        argocd app sync item-management-api
+        argocd app sync item-management-api --timeout 300
+
+    - name: Check ArgoCD sync status
+      run: |
+        for i in {1..10}; do
+          sync_status=$(argocd app get item-management-api -o json | jq -r '.status.sync.status')
+          health_status=$(argocd app get item-management-api -o json | jq -r '.status.health.status')
+          echo "Sync Status: $sync_status, Health Status: $health_status"
+          if [ "$sync_status" == "Synced" ] && [ "$health_status" == "Healthy" ]; then
+            echo "Application successfully synced and healthy"
+            exit 0
+          fi
+          sleep 30
+        done
+        echo "Sync did not complete in the expected time"
+        argocd app get item-management-api
+        exit 1
 
     - name: Apply Kubernetes manifests
       run: |
