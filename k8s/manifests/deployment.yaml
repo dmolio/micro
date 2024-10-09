@@ -14,6 +14,6 @@ spec:
     spec:
       containers:
       - name: item-management-api
-        image: dmolio/item-management-api:latest
+        image: dmolio/item-management-api:0b2a54aaf5e6d08ec8e0a417afb5864eae10c507
         ports:
         - containerPort: 5001
