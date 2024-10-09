@@ -62,9 +62,16 @@ jobs:
       run: |
         aws eks update-kubeconfig --name demo-cluster --region us-east-1
 
+    - name: Create ArgoCD namespace (if not exists)
+      run: |
+        if ! kubectl get namespace argocd &> /dev/null; then
+          kubectl create namespace argocd
+        else
+          echo "Namespace argocd already exists"
+        fi
+
     - name: Install ArgoCD
       run: |
-        kubectl create namespace argocd
         kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 
     - name: Wait for ArgoCD to be ready
