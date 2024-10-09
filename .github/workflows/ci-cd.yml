@@ -11,10 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     
     - name: Set up Python
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v3
       with:
         python-version: '3.9'
     
@@ -32,7 +32,7 @@ jobs:
       run: docker build -t dmolio/item-management-api:${{ github.sha }} src
     
     - name: Log in to Docker Hub
-      uses: docker/login-action@v1
+      uses: docker/login-action@v2
       with:
         username: ${{ secrets.DOCKER_HUB_USERNAME }}
         password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
@@ -49,7 +49,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v1
@@ -70,9 +70,13 @@ jobs:
           echo "Namespace argocd already exists"
         fi
 
-    - name: Install ArgoCD
+    - name: Install ArgoCD (if not already installed)
       run: |
-        kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+        if ! kubectl get deployment argocd-server -n argocd &> /dev/null; then
+          kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+        else
+          echo "ArgoCD already installed"
+        fi
 
     - name: Wait for ArgoCD to be ready
       run: |
@@ -98,7 +102,7 @@ jobs:
       run: |
         argocd login localhost:8080 --username admin --password ${{ env.ARGOCD_PASSWORD }} --insecure
 
-    - name: Update Kubernetes manifests
+    - name: Update Kubernetes manifests with new image tag
       run: |
         sed -i 's|dmolio/item-management-api:.*|dmolio/item-management-api:${{ github.sha }}|' k8s/manifests/deployment.yaml
 
