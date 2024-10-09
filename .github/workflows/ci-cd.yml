@@ -62,8 +62,29 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: us-east-1
 
+    - name: Check if EKS Cluster exists
+      id: check_cluster
+      run: |
+        if eksctl get cluster --name demo-cluster --region us-east-1; then
+          echo "Cluster exists."
+          echo "exists=true" >> $GITHUB_ENV
+          export EKS_CLUSTER_URL=$(aws eks describe-cluster --name demo-cluster --query "cluster.endpoint" --output text --region us-east-1)
+          echo "EKS_CLUSTER_URL=$EKS_CLUSTER_URL" >> $GITHUB_ENV
+        else
+          echo "Cluster does not exist."
+          echo "exists=false" >> $GITHUB_ENV
+        fi
+
+    - name: Create EKS Cluster
+      if: env.exists == 'false'
+      run: |
+        eksctl create cluster --name demo-cluster --region us-east-1 --with-oidc --ssh-access --ssh-public-key your-key-name --managed
+        export EKS_CLUSTER_URL=$(aws eks describe-cluster --name demo-cluster --query "cluster.endpoint" --output text --region us-east-1)
+        echo "EKS_CLUSTER_URL=$EKS_CLUSTER_URL" >> $GITHUB_ENV
+
     - name: Update kubeconfig
       run: |
+        aws eks get-token --cluster-name demo-cluster | kubectl apply -f -
         aws eks update-kubeconfig --name demo-cluster --region us-east-1
 
     - name: Verify EKS cluster configuration
@@ -71,6 +92,12 @@ jobs:
         kubectl config view
         kubectl cluster-info
         kubectl get nodes
+
+    - name: Install ArgoCD CLI
+      run: |
+        curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+        sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
+        rm argocd-linux-amd64
 
     - name: Configure ArgoCD cluster
       run: |
@@ -99,12 +126,6 @@ jobs:
     - name: Wait for ArgoCD to be ready
       run: |
         kubectl wait --for=condition=available --timeout=600s deployment/argocd-server -n argocd
-
-    - name: Install ArgoCD CLI
-      run: |
-        curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-        sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
-        rm argocd-linux-amd64
 
     - name: Get ArgoCD admin password
       run: |
@@ -136,7 +157,13 @@ jobs:
 
     - name: Apply ArgoCD Application
       run: |
-        sed -i 's|server: .*|server: ${{ env.EKS_CLUSTER_URL }}|' k8s/manifests/argocd/application.yaml
+        # Extract the hostname from the EKS_CLUSTER_URL
+        EKS_HOSTNAME=$(echo ${{ env.EKS_CLUSTER_URL }} | sed -e 's|^[^/]*//||' -e 's|/.*$||')
+        
+        # Update the server in the application.yaml file
+        sed -i "s|server: .*|server: https://${EKS_HOSTNAME}|" k8s/manifests/argocd/application.yaml
+        
+        # Apply the updated application.yaml
         kubectl apply -f k8s/manifests/argocd/application.yaml
 
     - name: Trigger ArgoCD sync
@@ -165,5 +192,3 @@ jobs:
       run: |
         kubectl apply -f k8s/manifests/
 
-env:
-  EKS_CLUSTER_URL: https://1CE1E939FDABDD5423DFFA1CB429EDB0.gr7.us-east-1.eks.amazonaws.com
