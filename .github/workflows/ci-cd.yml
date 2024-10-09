@@ -49,7 +49,11 @@ jobs:
     if: github.ref == 'refs/heads/main'
     
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
 
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v1
@@ -108,13 +112,13 @@ jobs:
 
     - name: Commit and push updated manifests
       env:
-        PAT: ${{ secrets.PAT }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
         git add k8s/manifests/deployment.yaml
         git commit -m "Update image tag to ${{ github.sha }}"
-        git push https://dmolio:${PAT}@github.com/dmolio/micro.git
+        git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
 
     - name: Apply ArgoCD Application
       run: |
