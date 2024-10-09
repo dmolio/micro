@@ -60,8 +60,36 @@ jobs:
 
     - name: Update kubeconfig
       run: |
-        aws eks get-token --cluster-name demo-cluster --region us-east-1 | kubectl apply -f -
         aws eks update-kubeconfig --name demo-cluster --region us-east-1
+
+    - name: Install ArgoCD
+      run: |
+        kubectl create namespace argocd
+        kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+    - name: Wait for ArgoCD to be ready
+      run: |
+        kubectl wait --for=condition=available --timeout=600s deployment/argocd-server -n argocd
+
+    - name: Install ArgoCD CLI
+      run: |
+        curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+        sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
+        rm argocd-linux-amd64
+
+    - name: Get ArgoCD admin password
+      run: |
+        ARGOCD_PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
+        echo "ARGOCD_PASSWORD=$ARGOCD_PASSWORD" >> $GITHUB_ENV
+
+    - name: Port forward ArgoCD server
+      run: |
+        kubectl port-forward svc/argocd-server -n argocd 8080:443 &
+        sleep 5
+
+    - name: Login to ArgoCD
+      run: |
+        argocd login localhost:8080 --username admin --password ${{ env.ARGOCD_PASSWORD }} --insecure
 
     - name: Update Kubernetes manifests
       run: |
@@ -69,11 +97,15 @@ jobs:
 
     - name: Commit and push updated manifests
       run: |
-        git config --global user.name 'dmolio'
-        git config --global user.email 'dmolio@molnafsystems.com'
-        git add kubernetes/deployment.yaml
+        git config --global user.name 'GitHub Actions'
+        git config --global user.email 'actions@github.com'
+        git add k8s/manifests/deployment.yaml
         git commit -m "Update image tag to ${{ github.sha }}"
         git push
+
+    - name: Apply ArgoCD Application
+      run: |
+        kubectl apply -f k8s/manifests/argocd/application.yaml
 
     - name: Trigger ArgoCD sync
       run: |
