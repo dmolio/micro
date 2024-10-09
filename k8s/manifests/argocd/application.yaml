@@ -8,11 +8,13 @@ spec:
   source:
     repoURL: https://github.com/dmolio/micro.git
     targetRevision: HEAD
-    path: kubernetes
+    path: k8s/manifests
   destination:
-    server: https://XXXXXXXX.gr7.us-east-1.eks.amazonaws.com # Replace with your cluster's API server endpoint
+    server: https://1CE1E939FDABDD5423DFFA1CB429EDB0.gr7.us-east-1.eks.amazonaws.com # Replace with your cluster's API server endpoint
     namespace: default
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+    - CreateNamespace=true

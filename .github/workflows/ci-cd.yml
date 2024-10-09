@@ -25,7 +25,8 @@ jobs:
     
     - name: Run tests
       run: |
-        python -m unittest discover src/tests
+        cd src
+        python -m unittest discover tests
     
     - name: Build Docker image
       run: docker build -t dmolio/item-management-api:${{ github.sha }} src
@@ -64,12 +65,12 @@ jobs:
 
     - name: Update Kubernetes manifests
       run: |
-        sed -i 's|dmolio/item-management-api:.*|dmolio/item-management-api:${{ github.sha }}|' kubernetes/deployment.yaml
+        sed -i 's|dmolio/item-management-api:.*|dmolio/item-management-api:${{ github.sha }}|' k8s/manifests/deployment.yaml
 
     - name: Commit and push updated manifests
       run: |
-        git config --global user.name 'GitHub Actions'
-        git config --global user.email 'actions@github.com'
+        git config --global user.name 'dmolio'
+        git config --global user.email 'dmolio@molnafsystems.com'
         git add kubernetes/deployment.yaml
         git commit -m "Update image tag to ${{ github.sha }}"
         git push
@@ -77,3 +78,7 @@ jobs:
     - name: Trigger ArgoCD sync
       run: |
         argocd app sync item-management-api
+
+    - name: Apply Kubernetes manifests
+      run: |
+        kubectl apply -f k8s/manifests/
