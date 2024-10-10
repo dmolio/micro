@@ -91,9 +91,9 @@ jobs:
     - name: Update kubeconfig
       run: |
         aws eks update-kubeconfig --name demo-cluster --region us-east-1
-        kubectl config view
+        kubectl config view --raw
+        kubectl config current-context
         kubectl cluster-info
-        kubectl get nodes
 
     - name: Verify EKS cluster configuration
       run: |
@@ -109,7 +109,10 @@ jobs:
 
     - name: Configure ArgoCD cluster
       run: |
-        argocd cluster add ${{ env.EKS_CLUSTER_URL }} --name demo-cluster --insecure
+        EKS_CLUSTER_URL=$(aws eks describe-cluster --name demo-cluster --query "cluster.endpoint" --output text --region us-east-1)
+        echo "EKS Cluster URL: $EKS_CLUSTER_URL"
+        kubectl config view --raw
+        argocd cluster add $(kubectl config current-context) --name demo-cluster --insecure
 
     - name: Verify ArgoCD cluster configuration
       run: |
