@@ -90,8 +90,10 @@ jobs:
 
     - name: Update kubeconfig
       run: |
-        aws eks get-token --cluster-name demo-cluster | kubectl apply -f -
         aws eks update-kubeconfig --name demo-cluster --region us-east-1
+        kubectl config view
+        kubectl cluster-info
+        kubectl get nodes
 
     - name: Verify EKS cluster configuration
       run: |
