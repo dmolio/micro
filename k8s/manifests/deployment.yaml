@@ -17,3 +17,6 @@ spec:
         image: dmolio/item-management-api:74f623dcb18a964d395c5c814873579f5b99c3f0
         ports:
         - containerPort: 5001
+        env:
+        - name: REDIS_HOST
+          value: redis-service

@@ -112,3 +112,6 @@ jobs:
     - name: Output Load Balancer URL
       run: |
         echo "Your application is accessible at: http://${{ env.LOAD_BALANCER_URL }}"
+
+    - name: Apply Redis manifest
+      run: kubectl apply -f k8s/manifests/redis.yaml
