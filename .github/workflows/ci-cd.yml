@@ -6,13 +6,49 @@ on:
   pull_request:
     branches: [ main ]
 
+env:
+  AWS_REGION: us-east-1
+  EKS_CLUSTER_NAME: demo-cluster
+
 jobs:
-  build-and-test:
+  build-and-deploy:
     runs-on: ubuntu-latest
     
     steps:
     - uses: actions/checkout@v3
     
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Install eksctl
+      run: |
+        curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+        sudo mv /tmp/eksctl /usr/local/bin
+        eksctl version
+
+    - name: Check if EKS Cluster exists
+      id: check_cluster
+      run: |
+        if eksctl get cluster --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}; then
+          echo "exists=true" >> $GITHUB_ENV
+        else
+          echo "exists=false" >> $GITHUB_ENV
+        fi
+
+    - name: Create EKS Cluster
+      if: env.exists == 'false'
+      run: |
+        eksctl create cluster --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }} --managed
+
+    - name: Update kubeconfig
+      run: |
+        aws eks get-token --cluster-name ${{ env.EKS_CLUSTER_NAME }} | kubectl apply -f -
+        aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+
     - name: Set up Python
       uses: actions/setup-python@v3
       with:
@@ -43,163 +79,23 @@ jobs:
         docker tag dmolio/item-management-api:${{ github.sha }} dmolio/item-management-api:latest
         docker push dmolio/item-management-api:latest
 
-  deploy:
-    needs: build-and-test
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        fetch-depth: 0
-
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v1
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: us-east-1
-
-    - name: Install eksctl
-      run: |
-        curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
-        sudo mv /tmp/eksctl /usr/local/bin
-        eksctl version
-
-    - name: Check if EKS Cluster exists
-      id: check_cluster
-      run: |
-        if eksctl get cluster --name demo-cluster --region us-east-1; then
-          echo "Cluster exists."
-          echo "exists=true" >> $GITHUB_ENV
-          export EKS_CLUSTER_URL=$(aws eks describe-cluster --name demo-cluster --query "cluster.endpoint" --output text --region us-east-1)
-          echo "EKS_CLUSTER_URL=$EKS_CLUSTER_URL" >> $GITHUB_ENV
-        else
-          echo "Cluster does not exist."
-          echo "exists=false" >> $GITHUB_ENV
-        fi
-
-    - name: Create EKS Cluster
-      if: env.exists == 'false'
-      run: |
-        eksctl create cluster --name demo-cluster --region us-east-1 --with-oidc --ssh-access --ssh-public-key myec2Key --managed
-        export EKS_CLUSTER_URL=$(aws eks describe-cluster --name demo-cluster --query "cluster.endpoint" --output text --region us-east-1)
-        echo "EKS_CLUSTER_URL=$EKS_CLUSTER_URL" >> $GITHUB_ENV
-
-    - name: Update kubeconfig
-      run: |
-        aws eks update-kubeconfig --name demo-cluster --region us-east-1
-        kubectl config view --raw
-        kubectl config current-context
-        kubectl cluster-info
-
-    - name: Verify EKS cluster configuration
-      run: |
-        kubectl config view
-        kubectl cluster-info
-        kubectl get nodes
-
-    - name: Install ArgoCD CLI
-      run: |
-        curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-        sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
-        rm argocd-linux-amd64
-
-    - name: Configure ArgoCD cluster
-      run: |
-        EKS_CLUSTER_URL=$(aws eks describe-cluster --name demo-cluster --query "cluster.endpoint" --output text --region us-east-1)
-        echo "EKS Cluster URL: $EKS_CLUSTER_URL"
-        kubectl config view --raw
-        argocd cluster add $(kubectl config current-context) --name demo-cluster --insecure
-
-    - name: Verify ArgoCD cluster configuration
-      run: |
-        argocd cluster list
-
-    - name: Create ArgoCD namespace (if not exists)
-      run: |
-        if ! kubectl get namespace argocd &> /dev/null; then
-          kubectl create namespace argocd
-        else
-          echo "Namespace argocd already exists"
-        fi
-
-    - name: Install ArgoCD (if not already installed)
-      run: |
-        if ! kubectl get deployment argocd-server -n argocd &> /dev/null; then
-          kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-        else
-          echo "ArgoCD already installed"
-        fi
-
-    - name: Wait for ArgoCD to be ready
-      run: |
-        kubectl wait --for=condition=available --timeout=600s deployment/argocd-server -n argocd
-
-    - name: Get ArgoCD admin password
-      run: |
-        ARGOCD_PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
-        echo "ARGOCD_PASSWORD=$ARGOCD_PASSWORD" >> $GITHUB_ENV
-
-    - name: Port forward ArgoCD server
-      run: |
-        kubectl port-forward svc/argocd-server -n argocd 8080:443 &
-        sleep 5
-
-    - name: Login to ArgoCD
-      run: |
-        argocd login localhost:8080 --username admin --password ${{ env.ARGOCD_PASSWORD }} --insecure
-
-    - name: Update Kubernetes manifests with new image tag
+    - name: Update Kubernetes manifests
       run: |
         sed -i 's|dmolio/item-management-api:.*|dmolio/item-management-api:${{ github.sha }}|' k8s/manifests/deployment.yaml
-
-    - name: Commit and push updated manifests
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        git config --global user.name 'github-actions[bot]'
-        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-        git add k8s/manifests/deployment.yaml
-        git commit -m "Update image tag to ${{ github.sha }}"
-        git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
-
-    - name: Apply ArgoCD Application
-      run: |
-        # Extract the hostname from the EKS_CLUSTER_URL
-        EKS_HOSTNAME=$(echo ${{ env.EKS_CLUSTER_URL }} | sed -e 's|^[^/]*//||' -e 's|/.*$||')
-        
-        # Update the server in the application.yaml file
-        sed -i "s|server: .*|server: https://${EKS_HOSTNAME}|" k8s/manifests/argocd/application.yaml
-        
-        # Apply the updated application.yaml
-        kubectl apply -f k8s/manifests/argocd/application.yaml
-
-    - name: Trigger ArgoCD sync
-      run: |
-        argocd app sync item-management-api --timeout 600
-
-    - name: Check ArgoCD sync status
-      run: |
-        for i in {1..20}; do
-          sync_status=$(argocd app get item-management-api -o json | jq -r '.status.sync.status')
-          health_status=$(argocd app get item-management-api -o json | jq -r '.status.health.status')
-          echo "Sync Status: $sync_status, Health Status: $health_status"
-          if [ "$sync_status" == "Synced" ] && [ "$health_status" == "Healthy" ]; then
-            echo "Application successfully synced and healthy"
-            exit 0
-          fi
-          sleep 30
-        done
-        echo "Sync did not complete in the expected time"
-        argocd app get item-management-api
-        argocd app resources item-management-api
-        kubectl logs -n argocd -l app.kubernetes.io/name=argocd-application-controller --tail=100
-        exit 1
 
     - name: Apply Kubernetes manifests
       run: |
         kubectl apply -f k8s/manifests/
 
+    - name: Wait for deployment
+      run: |
+        kubectl rollout status deployment/item-management-api -n default
+
+    - name: Get Load Balancer URL
+      run: |
+        LB_URL=$(kubectl get svc item-management-api -n default -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+        echo "LOAD_BALANCER_URL=$LB_URL" >> $GITHUB_ENV
+
+    - name: Output Load Balancer URL
+      run: |
+        echo "Your application is accessible at: http://${{ env.LOAD_BALANCER_URL }}"
