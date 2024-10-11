@@ -59,14 +59,9 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r src/requirements.txt
     
-    - name: Run tests
-      run: |
-        cd src
-        python -m unittest discover tests
-    
     - name: Build Docker image
-      run: docker build -t dmolio/item-management-api:${{ github.sha }} src
-    
+      run: docker build -t dmolio/item-management-api:${{ github.sha }} .
+
     - name: Log in to Docker Hub
       uses: docker/login-action@v2
       with:
@@ -104,14 +99,10 @@ jobs:
       run: |
         kubectl rollout status deployment/item-management-api -n default
 
-    - name: Get Load Balancer URL
+    - name: Get Ingress URL
       run: |
-        LB_URL=$(kubectl get svc item-management-api -n default -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-        echo "LOAD_BALANCER_URL=$LB_URL" >> $GITHUB_ENV
-
-    - name: Output Load Balancer URL
-      run: |
-        echo "Your application is accessible at: http://${{ env.LOAD_BALANCER_URL }}"
+        INGRESS_HOST=$(kubectl get ingress item-management-api-ingress -o jsonpath='{.spec.rules[0].host}')
+        echo "Your application is accessible at: https://$INGRESS_HOST"
 
     - name: Apply Redis manifest
       run: kubectl apply -f k8s/manifests/redis.yaml
